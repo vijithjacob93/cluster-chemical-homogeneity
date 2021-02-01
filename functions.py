@@ -8,32 +8,24 @@ import astropy.units as u
 
 def Complete_Clusters():
     # read in Karchenko clusters catalog
-    data_directory = '/Users/vijithjacob93/Documents/Data_Files/' 
+    data_directory = 'Data/' 
     with fits.open(data_directory+'Cluster_Catalog_Kharchenko_updated.fits') as data:
         Complete_Clusters = pd.DataFrame(data[1].data)
     Complete_Clusters['CLUSTER_RADIUS']=Complete_Clusters['CLUSTER_RADIUS']*60.0
     Complete_Clusters['NAME']=Complete_Clusters['NAME'].str.strip()
-#     # condition to identify OCs from other objects
-#     oc_cond=Complete_Clusters.CLUSTER_STATUS.values=='              '
-#     # #define cluster size as radius * distance
-#     # Complete_Clusters['CLUSTER_SIZE']=Complete_Clusters['CENTRAL_RADIUS']*Complete_Clusters['DISTANCE']*np.pi/180
-#     #LOWER LIMIT FOR RADIUS
-#     Complete_Clusters.loc[np.logical_and.reduce((\
-#         Complete_Clusters['CLUSTER_RADIUS'].values<7,Complete_Clusters['DISTANCE'].values<2000)),'CLUSTER_RADIUS']=7.
-#     #UPPER LIMIT FOR RADIUS
-#     Complete_Clusters.loc[Complete_Clusters['CLUSTER_RADIUS']>100,'CLUSTER_RADIUS']/=2
     return Complete_Clusters
 
 
 def get_Gaia_PMs(cluster,obj_file_name,h_lims,color_lim):
 	# check for existing saved files
+    data_directory = 'Data/'	
     try:
-        merged_table_center=pd.read_csv('/uufs/astro.utah.edu/common/home/u1063369/Documents/'+\
-                'Membership_Pipeline_Run_8/Files/'+cluster.name+'_merged_center_file')
-        merged_table_annulus=pd.read_csv('/uufs/astro.utah.edu/common/home/u1063369/Documents/'+\
-                'Membership_Pipeline_Run_8/Files/'+cluster.name+'_merged_annulus_file')
-        merged_table_total=pd.read_csv('/uufs/astro.utah.edu/common/home/u1063369/Documents/'+\
-                'Membership_Pipeline_Run_8/Files/'+cluster.name+'_merged_total_file')
+        merged_table_center=pd.read_csv(data_directory+\
+                'Membership_Pipeline_Files/'+cluster.name+'_merged_center_file')
+        merged_table_annulus=pd.read_csv(data_directory+\
+                'Membership_Pipeline_Files/'+cluster.name+'_merged_annulus_file')
+        merged_table_total=pd.read_csv(data_directory+\
+                'Membership_Pipeline_Files/'+cluster.name+'_merged_total_file')
         print('Found merged files')
     # if not found, download files
     except:
@@ -43,30 +35,24 @@ def get_Gaia_PMs(cluster,obj_file_name,h_lims,color_lim):
         for file_name in obj_file_name:
             file_name=file_name.strip()
             try:
-                try:
-                    hdulist1=fits.open('/uufs/chpc.utah.edu/common/home/sdss06/apogeework/apogee/target/'
-                                       'apogeeObject/apogeeObject_'+file_name+'.fits',hdu=1)
-                except:
-                    hdulist1=fits.open('/uufs/chpc.utah.edu/common/home/sdss06/apogeework/apogee/target/'
-                                       'apogee2Object/apogee2Object_'+file_name+'.fits',hdu=1)
+                hdulist1=fits.open(data_directory+'apogeeObject_'+file_name+'.fits',hdu=1)                    
                 data_stack=hdulist1[1].data
                 print('Found file '+file_name+'!')
                 data_obj=table.vstack([data_obj,Table(data_stack)],join_type='outer')
             except:
-                print('Couldn\'t find file '+file_name+'. But it\'s ok!')
+                print('Couldn\'t find file '+file_name+'. But that\'s ok!')
 
         # color-magnitude cuts
         data_obj=data_obj[np.logical_and(data_obj['H']>h_lims[0],data_obj['H']<h_lims[1])]
         data_obj=data_obj[np.subtract(np.subtract(data_obj['J'],data_obj['K']),1.5*data_obj['AK_TARG'])>color_lim]
 
-
         # find center and annulus stars in object file
         center_stars_obj=stars_within_radius(data_obj,1*cluster.radius,cluster.center)[0]
-#         center_stars_obj=center_stars_obj[data_obj[center_stars_obj]['PMRA_ERR']<8]
+        center_stars_obj=center_stars_obj[data_obj[center_stars_obj]['PMRA_ERR']<8]
 
         annulus_stars_obj=np.setdiff1d(stars_within_radius(data_obj,2*cluster.radius,cluster.center),
                                        stars_within_radius(data_obj,1.5*cluster.radius,cluster.center))
-#         annulus_stars_obj=annulus_stars_obj[data_obj[annulus_stars_obj]['PMRA_ERR']<8]
+        annulus_stars_obj=annulus_stars_obj[data_obj[annulus_stars_obj]['PMRA_ERR']<8]
         
         # all stars in the sky area (2x radius)
         total_stars_obj=stars_within_radius(data_obj,2*cluster.radius,cluster.center)[0]
@@ -78,15 +64,11 @@ def get_Gaia_PMs(cluster,obj_file_name,h_lims,color_lim):
         data_df_annulus=Table(data_obj[annulus_stars_obj]).to_pandas()
         data_df_center=Table(data_obj[center_stars_obj]).to_pandas()
         data_df_total=Table(data_obj[total_stars_obj]).to_pandas()
-
-        # check effect of objectfiles
-#         data_df_annulus = data_df_annulus[data_df_annulus['DEC']>40.2]
-#         data_df_annulus = data_df_annulus[data_df_annulus['RA']<295.3]
         
         # Gaia TAP query to get all the Gaia stars in the sky area
         try:
-            gaia_pm=pd.read_csv('/uufs/astro.utah.edu/common/home/u1063369/Documents/Membership Pipeline Run 4/'+\
-                                +'Files/'+cluster.name+'_Gaia_TAP_file')
+            gaia_pm=pd.read_csv(data_directory+\
+                'Membership_Pipeline_Files/'+cluster.name+'_Gaia_TAP_file')
             print('Found Gaia file')
         except:
             from astroquery.gaia import Gaia
@@ -103,8 +85,8 @@ def get_Gaia_PMs(cluster,obj_file_name,h_lims,color_lim):
             gaia_pm=job.get_results()
             gaia_pm['original_ext_source_id']=np.array(gaia_pm['original_ext_source_id']).astype('str')
             gaia_pm=gaia_pm.to_pandas()
-#             gaia_pm.to_csv('/uufs/astro.utah.edu/common/home/u1063369/Documents/Membership Pipeline Run 8/Files/allStar-r12-l33/'+\
-#                            cluster.name+'_Gaia_TAP_file')
+            gaia_pm.to_csv(data_directory+\
+                'Membership_Pipeline_Files/'+cluster.name+'_Gaia_TAP_file')
 
         # join APOGEE object file with Gaia TAP file
         merged_table_annulus=data_df_annulus.merge(gaia_pm,how='inner',left_on='APOGEE_ID',\
@@ -116,12 +98,12 @@ def get_Gaia_PMs(cluster,obj_file_name,h_lims,color_lim):
         merged_table_total=gaia_pm.merge(data_df_total,how='inner',left_on='original_ext_source_id',\
                                           right_on='APOGEE_ID')
 
-#         merged_table_center.to_csv('/uufs/astro.utah.edu/common/home/u1063369/Documents/'+\
-#                 'Membership Pipeline Run 8/Files/allStar-r12-l33/'+cluster.name+'_merged_center_file')
-#         merged_table_annulus.to_csv('/uufs/astro.utah.edu/common/home/u1063369/Documents/'+\
-#                 'Membership Pipeline Run 8/Files/allStar-r12-l33/'+cluster.name+'_merged_annulus_file')
-#         merged_table_total.to_csv('/uufs/astro.utah.edu/common/home/u1063369/Documents/'+\
-#                 'Membership Pipeline Run 8/Files/allStar-r12-l33/'+cluster.name+'_merged_total_file')
+        merged_table_center.to_csv(data_directory+\
+                'Membership_Pipeline_Files/'+cluster.name+'_merged_center_file')
+        merged_table_annulus.to_csv(data_directory+\
+                'Membership_Pipeline_Files/'+cluster.name+'_merged_annulus_file')
+        merged_table_total.to_csv(data_directory+\
+                'Membership_Pipeline_Files/'+cluster.name+'_merged_total_file')
     return [merged_table_center,merged_table_annulus,merged_table_total]
 
 def stars_within_radius(data_new,cluster_radius,cluster_center):
@@ -281,10 +263,11 @@ def dist_center_function(coords,cluster_center):
     return dist.arcmin
 
 def cluster_membership(cluster_name,data_new):
-    print(' ')
+    # main function called to determine cluster members
     try:
+	# list of recovered clusters
         global recovered_cluster_list
-    
+	# define an object of the class 'Cluster'
         cluster=Cluster(cluster_name)
     
         #Finding center stars and annulus stars
@@ -297,24 +280,24 @@ def cluster_membership(cluster_name,data_new):
         data_annulus_stars=data_new[annulus_stars]
         data_total_stars=data_new[total_stars]
         
-        #just a random print statement
+        # see what we've got
         print(cluster_name,' Central stars=',len(center_stars),'; Annulus Stars=',len(annulus_stars),
                ' Total stars=',len(total_stars))
 
-        #at least 3 stars in the central region
+        #at least 5 stars in the central region
         if len(data_center_stars)>5:
             
-            #find all different fields spanned by stars in this patch of sky
+            # find all different fields spanned by stars in this patch of sky
             uniq=np.unique(data_total_stars['FIELD'],return_counts=True)
-            #color limits as seen in center stars in APOGEE
+            # color limits as seen in center stars in APOGEE
             color_lim=np.min(np.subtract(np.subtract(data_total_stars['J'],data_total_stars['K']),
                                          1.5*data_total_stars['AK_TARG']))
             
-            #get Gaia center and annulus stars using Gaia TAP query
+            # get Gaia center and annulus stars using Gaia TAP query
             phot_gaia_center, phot_gaia_annulus, phot_gaia_total = get_Gaia_PMs(cluster,uniq[0],\
                             [np.min(data_total_stars['H']), np.max(data_total_stars['H'])], color_lim)
-            #extract PMs and RVs for the Gaia stars
-            #making sure pmra and pmdec from Gaia do not have high errors
+            # extract PMs and RVs for the Gaia stars
+            # making sure pmra and pmdec from Gaia do not have high errors
             pm_center_err_cond = [np.logical_and(phot_gaia_center['pmra_error']<2.0,\
                                                  phot_gaia_center['pmdec_error']<2.0)][0]
             pm_annulus_err_cond = [np.logical_and(phot_gaia_annulus['pmra_error']<2.0,\
@@ -325,7 +308,7 @@ def cluster_membership(cluster_name,data_new):
             PM_DEC_annulus=np.array(phot_gaia_annulus['pmdec'][pm_annulus_err_cond])
           
             
-            #Fitting the PMs with 2D Gaussian
+            # fit the PMs with 2D Gaussian
             size=0.1
             pm_lims=[-150,150]
             x=np.arange(pm_lims[0],pm_lims[1],size)
@@ -339,7 +322,7 @@ def cluster_membership(cluster_name,data_new):
                 parameters_PM[3]**2+st.median_absolute_deviation(PM_RA_annulus[~np.isnan(PM_RA_annulus)])**2\
                 +st.median_absolute_deviation(PM_DEC_annulus[~np.isnan(PM_DEC_annulus)])**2))
             
-            #same for Radial Velocities
+            # same for Radial Velocities
             annulus_dens_V_RAD = KDE(data_annulus_stars['VHELIO_AVG'],x,center_stars)            
             center_dens_V_RAD = KDE(data_center_stars['VHELIO_AVG'],x,center_stars)
             subtracted_dens_V_RAD=center_dens_V_RAD-annulus_dens_V_RAD#subtracting annulus distr from central
@@ -347,20 +330,20 @@ def cluster_membership(cluster_name,data_new):
             
             parameters_V_RAD,covariances_V_RAD,x=Gaussian_fit(x,subtracted_dens_V_RAD,cluster_name)#fitting
             
-            #quality of fit for Radial Velocity
+            # quality of fit for Radial Velocity
             peak=np.array([np.argmax(subtracted_dens_V_RAD)])
             residual=np.std(subtracted_dens_V_RAD[np.where(np.logical_or(x<x[peak[0]]-6,x>x[peak[0]]+6))])
             Ampl_residual_RV=subtracted_dens_V_RAD[peak[0]]/residual
             peak_separation_RV=abs(parameters_V_RAD[0]-np.median(data_annulus_stars['VHELIO_AVG']))/\
                 np.sqrt(parameters_V_RAD[1]**2+st.median_absolute_deviation(data_annulus_stars['VHELIO_AVG'])**2)
             
-            #rescaling fit for RV
+            # rescaling fit for RV
             fit=norm.pdf(x,parameters_V_RAD[0],parameters_V_RAD[1])
             fit_factor=subtracted_dens_V_RAD[peak[0]]/np.max(fit)
             fit=fit*fit_factor
             normed_fit=fit/max(fit)
 
-            #Finding Probabilities in each Dimension
+            # find probabilities in each dimension
             prob_RV=np.zeros(len(data_total_stars))
             prob_PM=np.zeros(len(data_total_stars))
             dist_center=np.zeros(len(data_total_stars))
@@ -372,11 +355,11 @@ def cluster_membership(cluster_name,data_new):
                 i,j=data_total_stars['GAIA_PMRA'][count],data_total_stars['GAIA_PMDEC'][count]
                 prob_PM[count]=prob_member_2D([i,j],parameters_PM)#PM probability in a separate function
             
-            #calculate number of sigmas from probability
+            # calculate number of sigmas from probability
             n_sigmas_RV=n_sigma_function(prob_RV)
             n_sigmas_PM=n_sigma_function(prob_PM)
             
-            #this is the new condition using no of sigmas
+            # modify these parameters to change sensitivity to the kinematics dimensions while determining members
             w1=1#peak_separation_RV
             w2=1#peak_separation_PM
             A1=1
@@ -384,68 +367,58 @@ def cluster_membership(cluster_name,data_new):
             prob_total=np.exp((A1*w1*np.log(prob_RV)+A2*w2*np.log(prob_PM))/(A1*w1+A2*w2))
             n_sigmas_total=n_sigma_function(prob_total)
             
-            data_new_cluster=data_total_stars[n_sigmas_total<3]
-
+	    # number of cluster stars found	
+            data_new_cluster=data_total_stars[n_sigmas_total<3]    
             print('Number of cluster stars=',len(data_new_cluster))
 
-            #define parameters to save in file
+            # define parameters to save in file
             M_H=np.mean(data_new_cluster["M_H"])#Complete_Clusters[Complete_Clusters['NAME']==cluster_name]["METALLICITY"].values
             M_H_dispersion=np.std(data_new_cluster["M_H"][data_new_cluster['M_H']>-9000])#Complete_Clusters[Complete_Clusters['NAME']==cluster_name]["METALLICITY_ERROR"].values
             num_bkgd_stars = len(data_annulus_stars)
             num_cluster_members = len(data_new_cluster)
             velocity_dispersion = np.std(data_new_cluster['VHELIO_AVG'])
+	    # use flags to identify 'good' and 'bad' recoveries
             if (np.logical_and(len(data_new_cluster)>3,Ampl_residual_RV>9.5)):
                 validation_flag = 'GOOD'
             else:
                 validation_flag = 'BAD'
 
 #             save file with total stars including center stars and annulus stars with their no. of sigmas
-#             ascii.write([[cluster.name]*len(data_total_stars),data_total_stars['APOGEE_ID'],
-#                          data_total_stars['RA'],data_total_stars['DEC'],data_total_stars['GLON'],
-#                         data_total_stars['GLAT'],n_sigmas_RV,n_sigmas_PM,n_sigmas_total,dist_center,
-#                          [cluster.log_age]*len(data_total_stars)],
-#             '/uufs/astro.utah.edu/common/home/u1063369/Documents/Membership Pipeline Run 8/Files/'+cluster_name+
-#                         '_members_and_background_Kharchenko.dat', 
-#                         names=['Cluster','APOGEE_ID','RA','DEC','GLON','GLAT','no_sigmas_RV','no_sigmas_PM', 
-#                                'no_sigmas_total','dist_center','log_age'])
+            ascii.write([[cluster.name]*len(data_total_stars),data_total_stars['APOGEE_ID'],
+                         data_total_stars['RA'],data_total_stars['DEC'],data_total_stars['GLON'],
+                        data_total_stars['GLAT'],n_sigmas_RV,n_sigmas_PM,n_sigmas_total,dist_center,
+                         [cluster.log_age]*len(data_total_stars)],
+            '/uufs/astro.utah.edu/common/home/u1063369/Documents/Membership Pipeline Run 8/Files/'+cluster_name+
+                        '_members_and_background_Kharchenko.dat', 
+                        names=['Cluster','APOGEE_ID','RA','DEC','GLON','GLAT','no_sigmas_RV','no_sigmas_PM', 
+                               'no_sigmas_total','dist_center','log_age'])
 #             save a separate file with cluster parameters
-#             ascii.write([[cluster.name],[cluster.status],[cluster.center.ra.degree],\
-#                          [cluster.center.dec.degree],[cluster.radius],[cluster.distance],[APOGEE_distance],\
-#                          [APOGEE_distance_err],[velocity_dispersion],[cluster.log_age],\
-#                          [cluster.log_age_err]\
-#                          ,[M_H],[M_H_dispersion],[parameters_V_RAD[0]],[parameters_V_RAD[1]],\
-#                          [parameters_V_RAD[2]],[parameters_PM[0]],[parameters_PM[1]],[parameters_PM[2]],\
-#                          [parameters_PM[3]],[parameters_PM[4]],[parameters_PM[5]],[parameters_PM[6]],\
-#                          [uniq[0][np.argmax(uniq[1])]],[Ampl_residual_RV],[peak_separation_RV],\
-#                          [peak_separation_PM],[num_bkgd_stars],[num_cluster_members],[validation_flag]],\
-#             '/uufs/astro.utah.edu/common/home/u1063369/Documents/Membership Pipeline Run 8/Files/'+cluster_name+
-#                         '_RV_and_PM_fit_parameters_Kharchenko.dat',
-#                 names=list(['Cluster_Name','Cluster_Status','Cluster_Center_RA','Cluster_Center_DEC',
-#                 'Cluster_Radius','Heliocentric_Distance_Catalog','Heliocentric_Distance_APOGEE',\
-#                 'Heliocentric_Distance_err_APOGEE','Velocity_dispersion','log_age','log_age_err','Metallicity',
-#                 'Metallicity_dispersion','RV_fit_Mean','RV_fit_Std_Dev','RV_fit_Amplitude','PM_fit_RA Mean',
-#                 'PM_fit_DEC_Mean','PM_fit_RA_Std_Dev','PM_fit_DEC_Std_Dev','PM_fit_Amplitude','PM_fit_Theta',
-#                 'PM_fit_Background_Scale','Field Used for PMs','Ampl_residual_RV','peak_separation_RV',\
-#                 'peak_separation_PM','num_background_stars','num_cluster_members','Validation']))                
+            ascii.write([[cluster.name],[cluster.status],[cluster.center.ra.degree],\
+                         [cluster.center.dec.degree],[cluster.radius],[cluster.distance],[APOGEE_distance],\
+                         [APOGEE_distance_err],[velocity_dispersion],[cluster.log_age],\
+                         [cluster.log_age_err]\
+                         ,[M_H],[M_H_dispersion],[parameters_V_RAD[0]],[parameters_V_RAD[1]],\
+                         [parameters_V_RAD[2]],[parameters_PM[0]],[parameters_PM[1]],[parameters_PM[2]],\
+                         [parameters_PM[3]],[parameters_PM[4]],[parameters_PM[5]],[parameters_PM[6]],\
+                         [uniq[0][np.argmax(uniq[1])]],[Ampl_residual_RV],[peak_separation_RV],\
+                         [peak_separation_PM],[num_bkgd_stars],[num_cluster_members],[validation_flag]],\
+            '/uufs/astro.utah.edu/common/home/u1063369/Documents/Membership Pipeline Run 8/Files/'+cluster_name+
+                        '_RV_and_PM_fit_parameters_Kharchenko.dat',
+                names=list(['Cluster_Name','Cluster_Status','Cluster_Center_RA','Cluster_Center_DEC',
+                'Cluster_Radius','Heliocentric_Distance_Catalog','Heliocentric_Distance_APOGEE',\
+                'Heliocentric_Distance_err_APOGEE','Velocity_dispersion','log_age','log_age_err','Metallicity',
+                'Metallicity_dispersion','RV_fit_Mean','RV_fit_Std_Dev','RV_fit_Amplitude','PM_fit_RA Mean',
+                'PM_fit_DEC_Mean','PM_fit_RA_Std_Dev','PM_fit_DEC_Std_Dev','PM_fit_Amplitude','PM_fit_Theta',
+                'PM_fit_Background_Scale','Field Used for PMs','Ampl_residual_RV','peak_separation_RV',\
+                'peak_separation_PM','num_background_stars','num_cluster_members','Validation']))                
         
             n_sigmas_total=n_sigmas_total[n_sigmas_total<3]
 
-            if (np.logical_and(len(data_new_cluster)>3,Ampl_residual_RV>9.5)): 
-        
-        
-            #condition for number of cluster members/RV fit quality
-                
-                #make directory
-                import os
-                # define the name of the directory to be created
-                path = "/uufs/astro.utah.edu/common/home/u1063369/Documents/Clusters from membership/"\
-                        +cluster_name+"/"
-                try:
-                    os.mkdir(path)
-                except OSError:
-                    pass
-                
-                #Plot 'em up!
+	   # now let's make some plots of what we've recovered!
+           # condition for number of cluster members/RV fit quality
+           if (np.logical_and(len(data_new_cluster)>3,Ampl_residual_RV>9.5)): 
+                               
+                # quality bitmasks
                 bitmask_cond = np.logical_and.reduce((\
                     data_new_cluster['STARFLAG'] & 2**17 == 0, data_new_cluster['STARFLAG'] & 2**2 == 0,\
                     data_new_cluster['STARFLAG'] & 2**3 == 0, data_new_cluster['ASPCAPFLAG'] & 2**19 == 0,\
@@ -454,13 +427,13 @@ def cluster_membership(cluster_name,data_new):
                 data_new_cluster_bitmask = data_new_cluster[bitmask_cond]
                 n_sigmas_total_bitmask = n_sigmas_total[bitmask_cond]
 
+		# define figure parameters
                 fig, ax = plt.subplots(nrows=3, ncols=2, figsize=(7,10))
                 pm_range_x = [-10,5]
                 pm_range_y = [-10,5]
                 inner_color = 'blue'
                 annulus_color = 'green'
                 field_color = 'gray'
-                #calculating no of sigmas from probability
 
                 labelsize=12
                 pm_contourf_levels = [0.1,0.25,0.5,0.75,0.9,1.0]                
@@ -530,7 +503,7 @@ def cluster_membership(cluster_name,data_new):
                 ax[0,1].set_xlabel('RA [deg]', fontsize=labelsize)
                 ax[0,1].set_ylabel('Dec [deg]', fontsize=labelsize)
 
-                #RV plo
+                #RV plot
                 ax[1,0].plot(x,center_dens_V_RAD,color=inner_color,alpha=0.8,label='Center stars')
                 ax[1,0].plot(x,annulus_dens_V_RAD,color=annulus_color,alpha=0.8, label='Annulus stars')
                 ax[1,0].plot(x,subtracted_dens_V_RAD,color='k',linewidth=1.2,alpha=0.8, \
@@ -637,8 +610,7 @@ def cluster_membership(cluster_name,data_new):
                 fig.suptitle(cluster_name,y = 0.03, fontsize=labelsize, fontweight = 'bold')
                 fig.tight_layout()
                 
-#                 fig.savefig('/uufs/astro.utah.edu/common/home/u1063369/Documents/Membership_Pipeline_Run_8/'
-#                         'Plots/Paper/Member_selection_diagnostic plots:'+cluster_name+'.png',dpi=200)
+                fig.savefig(data_directory+'Membership_Pipeline_Files/'+cluster_name+'.png',dpi=200)
                 plt.show()
                                 
                 return 1.
@@ -648,9 +620,9 @@ def cluster_membership(cluster_name,data_new):
         else:
             print('Number of center stars is less')
             return 0.
-#     except Exception:
-#         print('Exception')
-#         return 0.
+    except Exception:
+        print('Exception')
+        return 0.
     except ValueError:
         print('ValueError')
         return 0.
@@ -663,18 +635,18 @@ def cluster_membership(cluster_name,data_new):
     except IOError:
         print('IOError')
         return 0.
-#     except KeyError:
-#         print('KeyError')
-#         return 0.
+    except KeyError:
+        print('KeyError')
+        return 0.
     except TypeError:
         print('TypeError')
         return 0.
     except ZeroDivisionError:
         print('ZeroDivisionError')
         return 0.
-#     except :
-#         print('Unexpected Error')
-#         return 0.
+    except :
+        print('Unexpected Error')
+        return 0.
 
 
 
