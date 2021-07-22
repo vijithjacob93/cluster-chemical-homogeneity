@@ -1,6 +1,6 @@
 from astropy.io import fits
 import pandas as pd
-from classes import fits_file,Cluster
+from clusterchemistry.classes import fits_file,Cluster
 import numpy as np
 from astropy.coordinates import SkyCoord
 import astropy.units as u
@@ -683,7 +683,7 @@ def cluster_membership(cluster_name,data_new):
 
 
 #Voronoi binning functions
-from time import clock
+from time import perf_counter
 import numpy as np
 # import matplotlib.pyplot as plt
 from scipy.spatial import distance, cKDTree
@@ -1060,7 +1060,7 @@ def voronoi_2d_binning(x, y, signal, noise, targetSN, cvt=True,
     if np.min(signal/noise) > targetSN:
         raise ValueError('All pixels have enough S/N and binning is not needed')
 
-    t1 = clock()
+    t1 = perf_counter()
     if not quiet:
         print('Bin-accretion...')
     classe, pixelsize = _accretion(
@@ -1071,7 +1071,7 @@ def voronoi_2d_binning(x, y, signal, noise, targetSN, cvt=True,
     xnode, ynode = _reassign_bad_bins(classe, x, y)
     if not quiet:
         print(xnode.size, ' good bins.')
-    t2 = clock()
+    t2 = perf_counter()
     if cvt:
         if not quiet:
             print('Modified Lloyd algorithm...')
@@ -1084,7 +1084,7 @@ def voronoi_2d_binning(x, y, signal, noise, targetSN, cvt=True,
     classe, xBar, yBar, sn, area = _compute_useful_bin_quantities(
         x, y, signal, noise, xnode, ynode, scale, sn_func)
     single = area == 1
-    t3 = clock()
+    t3 = perf_counter()
     if not quiet:
         print('Unbinned pixels: ', np.sum(single), ' / ', x.size)
         print('Fractional S/N scatter (%):', np.std(sn[~single] - targetSN, ddof=1)/targetSN*100)
