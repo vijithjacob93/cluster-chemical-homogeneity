@@ -10,7 +10,7 @@ class fits_file(object):
         import numpy as np
         from astropy.table import Table
         if filedir == 'default':
-            filedir = '/Users/vijithjacob93/Documents/Data_Files/'
+            filedir = ''
         else:
             pass
         self.data = Table.read(filedir+filename, format='fits')

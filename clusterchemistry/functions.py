@@ -15,7 +15,7 @@ from scipy import stats
 
 def Complete_Clusters_func():
     # read in Karchenko clusters catalog
-    data_directory = '/Users/vijithjacob93/Documents/Data_Files/' 
+    data_directory = '' 
     with fits.open(data_directory+'Cluster_Catalog_Kharchenko_updated.fits') as data:
         Complete_Clusters = pd.DataFrame(data[1].data)
     Complete_Clusters['CLUSTER_RADIUS']=Complete_Clusters['CLUSTER_RADIUS']*60.0
