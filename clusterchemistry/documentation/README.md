@@ -9,3 +9,4 @@ This repository consists of the code used for a project studying the chemical ho
 
 """Additional data"""
 Additional data that may be required to utilize all the functionalities in the module can be downloaded from the following Dropbox link: https://www.dropbox.com/sh/clqt6tj9p417chz/AAAcnf-TxeAVQtmt3sjAe_uOa?dl=0
+Download and save the files to the '/data/' directory in the repository for easiest access.

@@ -10,7 +10,7 @@ class fits_file(object):
         import numpy as np
         from astropy.table import Table
         if filedir == 'default':
-            filedir = ''
+            filedir = '../data/'
         else:
             pass
         self.data = Table.read(filedir+filename, format='fits')
@@ -117,7 +117,7 @@ class fits_file(object):
 # class for each cluster of stars, containing important properties 
 class Cluster():
     def __init__(self,name):#="",glon=0.0,glat=0.0,radius=0.0):
-        from functions import Complete_Clusters_func
+        from clusterchemistry.functions import Complete_Clusters_func
         Complete_Clusters = Complete_Clusters_func()
         clust_cond=Complete_Clusters['NAME']==name
         self.name=name

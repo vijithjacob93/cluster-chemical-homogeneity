@@ -15,7 +15,7 @@ from scipy import stats
 
 def Complete_Clusters_func():
     # read in Karchenko clusters catalog
-    data_directory = '' 
+    data_directory = '../data/' 
     with fits.open(data_directory+'Cluster_Catalog_Kharchenko_updated.fits') as data:
         Complete_Clusters = pd.DataFrame(data[1].data)
     Complete_Clusters['CLUSTER_RADIUS']=Complete_Clusters['CLUSTER_RADIUS']*60.0
@@ -35,9 +35,9 @@ def Complete_Clusters_func():
 def get_Gaia_PMs(cluster,obj_file_name,h_lims,color_lim):
 	# check for existing saved files
     try:
-        merged_table_center=pd.read_csv('Files/'+cluster.name+'_merged_center_file')
-        merged_table_annulus=pd.read_csv('Files/'+cluster.name+'_merged_annulus_file')
-        merged_table_total=pd.read_csv('Files/'+cluster.name+'_merged_total_file')
+        merged_table_center=pd.read_csv('../data/membership_selection/'+cluster.name+'_merged_center_file')
+        merged_table_annulus=pd.read_csv('../data/membership_selection/'+cluster.name+'_merged_annulus_file')
+        merged_table_total=pd.read_csv('../data/membership_selection/'+cluster.name+'_merged_total_file')
         print('Found merged files')
     # if not found, download files
     except:
@@ -588,7 +588,7 @@ def cluster_membership(cluster_name,data_new):
                         ,np.std(data_new_cluster[data_new_cluster['M_H']>-100]['M_H'])
 
                     
-                iso_data=pd.read_csv('all_isochrones.dat',skiprows=11,delim_whitespace=True,comment="#")
+                iso_data=pd.read_csv('../data/all_isochrones.dat',skiprows=11,delim_whitespace=True,comment="#")
                 iso_data = iso_data[np.isclose(iso_data["MH"], cluster_mean_mh, atol=0.05)]
                 iso_data = iso_data[np.isclose(iso_data["logAge"], cluster.log_age, atol=0.125)]
 
@@ -1185,5 +1185,104 @@ def voronoi_binning_example(df_func, targetSN):
     
     return binNum, xNode, yNode, xBar, yBar, sn, nPixels, scale
 #-----------------------------------------------------------------------------
+
+
+#numerical estimate of the intrinsic scatter in abundances using log likelihood
+def maximum_likelihood_estimate(joined,cluster_name):
+    trusted_elements = ['NA_FE','MG_FE','AL_FE','SI_FE','S_FE','K_FE','CA_FE','CR_FE','MN_FE',\
+                    'FE_H','NI_FE','CU_FE','TI_FE']
+    
+    from astroML.plotting.mcmc import convert_to_stdev
+    from astroML.plotting import setup_text_plots
+#     setup_text_plots(fontsize=8, usetex=True)
+    def gaussgauss_logL(xi, ei, mu, sigma):
+#         sigma = np.exp(lnsigma)
+        """Equation 5.63: gaussian likelihood with gaussian errors"""
+        #initialize the data
+        ndim = len(np.broadcast(sigma, mu).shape)
+        
+        xi = xi.reshape(xi.shape + tuple(ndim * [1]))
+        ei = ei.reshape(ei.shape + tuple(ndim * [1]))
+        #return the LogL function
+        s2_e2 = sigma ** 2 + ei ** 2
+        return -0.5 * np.sum(np.log(s2_e2) + (xi - mu) ** 2 / s2_e2, 0)
+
+    #initialize the properties to be calculated
+    mu_0=np.zeros(len(trusted_elements))
+    mu_0_uncert=np.zeros(len(trusted_elements))
+    sigma_0=np.zeros(len(trusted_elements))
+    sigma_0_uncert=np.zeros(len(trusted_elements))
+#     std_abund=np.zeros(len(trusted_elements))
+#     no_members=np.zeros(len(trusted_elements))
+    
+    #iterate over all elements
+    for i in range(len(trusted_elements)):
+
+        N = 10
+        #wqality cuts on the abundances and uncertainties
+        ei = joined[trusted_elements[i]+'_uncertainty_derived'][np.logical_and.reduce((\
+                joined[trusted_elements[i]+'_FLAG'] == 0,joined[trusted_elements[i]]>-9000, \
+                        joined[trusted_elements[i]+'_uncertainty_failure_rate']<0.10))]#removing stars in high failure fraction bins
+
+        xi = joined[trusted_elements[i]][np.logical_and.reduce((\
+                joined[trusted_elements[i]+'_FLAG'] == 0,joined[trusted_elements[i]]>-9000, \
+                        joined[trusted_elements[i]+'_uncertainty_failure_rate']<0.10))]
+        #if too few members, skip cluster
+        if (len(xi)<5):
+            sigma_0[i] = np.nan
+            sigma_0_uncert[i] = np.nan
+            continue
+
+        #initialize the paramter space to search
+        sigma = np.linspace(0.0001, 0.35, 1000)
+        mu = np.linspace(-1.0, 1.0, 100)
+        #calculate the log likelihood
+        logL = gaussgauss_logL(xi, ei, mu, sigma[:, np.newaxis])
+        logL -= logL.max()
+
+        #find the optimal parameters using maximum of the log likelihood
+        plane=np.meshgrid(mu,sigma)
+        mu_0[i]=plane[0].reshape(-1)[np.argmax(logL)]
+        sigma_0[i]=plane[1].reshape(-1)[np.argmax(logL)]
+#         mean_uncert[i]=np.mean(ei)
+#         med_uncert[i]=np.median(ei)
+#         std_abund[i]=np.std(xi)
+#         no_members[i]=len(xi)
+
+        #calculating the uncertainties in parameters
+        def gauss(x, mu, sigma, A):
+            return A*np.exp(-(x-mu)**2/(2.*sigma**2))
+        el=np.exp(logL)
+        mean_sum=np.zeros(len(el))
+        el_sum=np.zeros(len(el))
+        for j in range(len(el)):
+            el_sum[j]=np.sum(el[j,:])
+#                 print(np.shape(el),np.shape(np.sum(el[:,j])),np.shape(mean_sum))
+#                 mean_sum[j] = np.sum(el[:,j])
+        try:
+            par,var=curve_fit(gauss, sigma, el_sum)
+            sigma_0_uncert[i]=par[1]/2
+
+            par_mean,var_mean=curve_fit(gauss, sigma, el_sum)
+            mu_0_uncert[i]=par_mean[1]/2
+
+        except:
+            sigma_0_uncert[i]=np.mean(ei)#/(sigma_0[i]*2) #derived mathematically
+
+    #assign calculated parameters to the cluster properties dataframe
+#     cluster_properties.loc[cluster_properties['Cluster']==cluster_name,\
+#                                 [i+'_intrinsic_scatter' for i in trusted_elements]]=
+
+#     cluster_properties.loc[cluster_properties['Cluster']==cluster_name,\
+#                              [i+'_intrinsic_scatter_uncertainty' for i in trusted_elements]]=sigma_0_uncert
+
+#     cluster_properties.loc[cluster_properties['Cluster']==cluster_name,\
+#                              [i+'_intrinsic_mean' for i in trusted_elements]]=mu_0
+
+#     cluster_properties.loc[cluster_properties['Cluster']==cluster_name,\
+#                              [i+'_intrinsic_mean_uncertainty' for i in trusted_elements]]=mu_0_uncert
+    
+    return sigma_0,sigma_0_uncert,mu_0,mu_0_uncert
+
 
 
