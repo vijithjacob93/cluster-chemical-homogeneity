@@ -4,6 +4,7 @@ from clusterchemistry.classes import fits_file,Cluster
 import numpy as np
 from astropy.coordinates import SkyCoord
 import astropy.units as u
+from astropy.table import Table
 
 from sklearn.neighbors import KernelDensity
 from scipy.optimize import curve_fit
@@ -13,31 +14,21 @@ import matplotlib.pyplot as plt
 from astropy.visualization.wcsaxes import SphericalCircle
 from scipy import stats
 
-def Complete_Clusters_func():
+def Complete_Clusters_func(data_directory):
     # read in Karchenko clusters catalog
-    data_directory = '../data/' 
     with fits.open(data_directory+'Cluster_Catalog_Kharchenko_updated.fits') as data:
         Complete_Clusters = pd.DataFrame(data[1].data)
     Complete_Clusters['CLUSTER_RADIUS']=Complete_Clusters['CLUSTER_RADIUS']*60.0
     Complete_Clusters['NAME']=Complete_Clusters['NAME'].str.strip()
-#     # condition to identify OCs from other objects
-#     oc_cond=Complete_Clusters.CLUSTER_STATUS.values=='              '
-#     # #define cluster size as radius * distance
-#     # Complete_Clusters['CLUSTER_SIZE']=Complete_Clusters['CENTRAL_RADIUS']*Complete_Clusters['DISTANCE']*np.pi/180
-#     #LOWER LIMIT FOR RADIUS
-#     Complete_Clusters.loc[np.logical_and.reduce((\
-#         Complete_Clusters['CLUSTER_RADIUS'].values<7,Complete_Clusters['DISTANCE'].values<2000)),'CLUSTER_RADIUS']=7.
-#     #UPPER LIMIT FOR RADIUS
-#     Complete_Clusters.loc[Complete_Clusters['CLUSTER_RADIUS']>100,'CLUSTER_RADIUS']/=2
     return Complete_Clusters
 
 
-def get_Gaia_PMs(cluster,obj_file_name,h_lims,color_lim):
+def get_Gaia_PMs(cluster,obj_file_name,h_lims,color_lim,data_dir):
 	# check for existing saved files
     try:
-        merged_table_center=pd.read_csv('../data/membership_selection/'+cluster.name+'_merged_center_file')
-        merged_table_annulus=pd.read_csv('../data/membership_selection/'+cluster.name+'_merged_annulus_file')
-        merged_table_total=pd.read_csv('../data/membership_selection/'+cluster.name+'_merged_total_file')
+        merged_table_center=pd.read_csv(data_dir+'membership_selection/'+cluster.name+'_merged_center_file')
+        merged_table_annulus=pd.read_csv(data_dir+'membership_selection/'+cluster.name+'_merged_annulus_file')
+        merged_table_total=pd.read_csv(data_dir+'membership_selection/'+cluster.name+'_merged_total_file')
         print('Found merged files')
     # if not found, download files
     except:
@@ -283,13 +274,13 @@ def dist_center_function(coords,cluster_center):
     dist=SkyCoord.separation(loc,cluster_center)
     return dist.arcmin
 
-def cluster_membership(cluster_name,data_new):
+def cluster_membership(cluster_name,data_new,data_dir):
     print(' ')
     try:
         global recovered_cluster_list
-        Complete_Clusters=Complete_Clusters_func()
+        Complete_Clusters=Complete_Clusters_func(data_dir)
     
-        cluster=Cluster(cluster_name)
+        cluster=Cluster(cluster_name,data_dir)
     
         #Finding center stars and annulus stars
         center_stars=stars_within_radius(data_new,1*cluster.radius,cluster.center)[0]
@@ -316,7 +307,7 @@ def cluster_membership(cluster_name,data_new):
             
             #get Gaia center and annulus stars using Gaia TAP query
             phot_gaia_center, phot_gaia_annulus, phot_gaia_total = get_Gaia_PMs(cluster,uniq[0],\
-                            [np.min(data_total_stars['H']), np.max(data_total_stars['H'])], color_lim)
+                            [np.min(data_total_stars['H']), np.max(data_total_stars['H'])], color_lim,data_dir)
             #extract PMs and RVs for the Gaia stars
             #making sure pmra and pmdec from Gaia do not have high errors
             pm_center_err_cond = [np.logical_and(phot_gaia_center['pmra_error']<2.0,\
@@ -1284,5 +1275,101 @@ def maximum_likelihood_estimate(joined,cluster_name):
     
     return sigma_0,sigma_0_uncert,mu_0,mu_0_uncert
 
+#to concatenate cluster members and parameters
+def concat_clusters(data_dir, Complete_Clusters):
+    from astropy.table import Table
+    try:
+        #Concatenate cluster members
+        #Find the first cluster with membership info
+        for j in range(1,len(Complete_Clusters)):
+            try:
+                from astropy.table import Table
+                f=Table.read(data_dir+"membership_selection/"+\
+                             Complete_Clusters['NAME'][j]+"_members_and_background_Kharchenko.dat",format='ascii')
+                break
+            except:
+                pass
+        #define the full table
+        full_table=f
+        #iterate over other membership info and add to full table
+        for i in range(j+1,len(Complete_Clusters)):
+            try:
+                filename=data_dir+"membership_selection/"+\
+                                        Complete_Clusters['NAME'][i]+"_members_and_background_Kharchenko.dat"
+                f=Table.read(filename,format='ascii')
+                full_table= table.vstack([full_table,f])
+            except:
+                pass
 
+    #join with DR16 file to get additional parameters
+        from astropy.table import unique
+        data_new = unique(data_new,keys='APOGEE_ID')
+        full_table = table.join(data_new['APOGEE_ID','M_H','MG_FE','VHELIO_AVG'],full_table,keys=['APOGEE_ID'],join_type='right')
 
+        #save full table of cluster membership
+        full_table.write(data_dir+"Cluster_members.fits",format='fits',overwrite=False)
+    except:
+        pass
+
+    #Concatenate cluster properties
+    from astropy.table import Table
+    try:
+        cluster_members_m_h = Table.read(data_dir+"Cluster_members.fits")
+    except:
+        cluster_members_m_h = Table.read(data_dir+"Cluster_members_complete.fits")
+    #initialize the properties file
+    try:
+        cluster_members_m_h_pd = cluster_members_m_h.to_pandas()
+        cluster_members_m_h_pd.reset_index(drop=True, inplace=True)
+        for i in range(len(cluster_members_m_h_pd)):
+            cluster_members_m_h_pd['Cluster'][i] = cluster_members_m_h_pd['Cluster'][i].decode("utf-8")
+        #Iterate over each cluster
+        for i,cluster_name in enumerate(np.unique(cluster_members_m_h['Cluster'])):
+            try:
+                #read the properties file foe each cluster
+                cluster_props = Table.read(data_dir+"membership_selection/"\
+                                           +cluster_name+'_RV_and_PM_fit_parameters_Kharchenko.dat',format = 'ascii')
+            except:
+                continue
+            #calculate properties for each cluster using the conditions for members
+            cluster_props['Metallicity'] = np.mean(cluster_members_m_h_pd[np.logical_and.reduce((\
+                cluster_members_m_h_pd['M_H']>-9000, cluster_members_m_h_pd['Cluster'] == cluster_name,\
+                cluster_members_m_h_pd['no_sigmas_total'] < 3))]['M_H'])
+            cluster_props['Metallicity_dispersion'] = np.std(cluster_members_m_h_pd[np.logical_and.reduce((\
+                cluster_members_m_h_pd['M_H']>-9000,cluster_members_m_h_pd['Cluster'] == cluster_name,\
+                cluster_members_m_h_pd['no_sigmas_total'] < 3))]['M_H'])
+            cluster_props['MG_FE'] = np.mean(cluster_members_m_h_pd[np.logical_and.reduce((\
+                cluster_members_m_h_pd['MG_FE']>-9000, cluster_members_m_h_pd['Cluster'] == cluster_name,\
+                cluster_members_m_h_pd['no_sigmas_total'] < 3))]['MG_FE'])
+            cluster_props['MG_FE_dispersion'] = np.std(cluster_members_m_h_pd[np.logical_and.reduce((\
+                cluster_members_m_h_pd['MG_FE']>-9000,cluster_members_m_h_pd['Cluster'] == cluster_name,\
+                cluster_members_m_h_pd['no_sigmas_total'] < 3))]['MG_FE'])
+            #assign validation flags
+            if np.logical_and(cluster_props['Validation'] == 'GOOD', cluster_props['Metallicity_dispersion']>0.132):
+                cluster_props['Validation'] = 'WARN'
+
+            if np.logical_and(np.logical_or(cluster_props['Validation'] == 'GOOD',cluster_props['Validation'] == 'WARN'), \
+                    len(cluster_members_m_h_pd[np.logical_and.reduce((cluster_members_m_h_pd['Cluster'] == cluster_name,\
+                            cluster_members_m_h_pd['no_sigmas_total'] < 3))])<5):
+                cluster_props['Validation'] = 'INSUFFICIENT_DATA'
+
+            try:
+                #assign OC flag
+                if (cluster_props['Cluster_Status'].fill_value == 999999) :
+                    cluster_props.remove_column('Cluster_Status')
+                    cluster_props['Cluster_Status'] = 'OC'
+            except:
+                pass
+            #assign GC flag
+            if (Complete_Clusters[Complete_Clusters['NAME'] == cluster_name]['CLUSTER_TYPE'].values == 'GLO         '):
+                cluster_props['Cluster_Status'] = 'GLO'
+            #if only one cluster is present
+            if i == 0:
+                cluster_props_table = cluster_props
+
+            else:
+                cluster_props_table = table.vstack([cluster_props_table,cluster_props])
+
+            cluster_props_table.write(data_dir+"Cluster_properties.fits",format = "fits", overwrite = False)
+    except:
+        pass
